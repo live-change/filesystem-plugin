@@ -1,0 +1,27 @@
+{
+  "name": "@live-change/filesystem-plugin",
+  "version": "0.1.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "NODE_ENV=test tape tests/*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/live-change/filesystem-plugin.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/live-change/filesystem-plugin/issues"
+  },
+  "homepage": "https://github.com/live-change/filesystem-plugin",
+  "author": {
+    "email": "michal@laszczewski.pl",
+    "name": "Michał Łaszczewski",
+    "url": "https://www.viamage.com/"
+  },
+  "dependencies": {
+    "chokidar": "^3.5.2",
+    "blue-tape": "^1.0.0"
+  }
+}

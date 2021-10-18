@@ -77,41 +77,47 @@ async function getContent(filename) {
   return fs.promises.readFile(filename, { encoding: 'utf8' })
 }
 
-async function observableContent(filename) {
-  return observableFile(filename, (name, stat) => fs.promises.readFile(name, { encoding: 'utf8' }))
+async function observableContent(filename, decoder = x=>x) {
+  return observableFile(filename,
+      (name, stat) => fs.promises.readFile(name, { encoding: 'utf8' })
+      .then(result => decoder(result))
+    )
 }
 
 const entryCompare = (a,b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0
 
-async function getList(dir, filter) {
+async function getList(dir, filter, mapper) {
   const list = await fs.promises.readdir(dir, { withFileTypes: true })
-  const entries = await Promise.all(list.map(async entry => ({
+  let entries = await Promise.all(list.map(async entry => ({
     name: entry.name,
     isDirectory: entry.isDirectory(),
     stat: await fs.promises.stat(path.resolve(dir, entry.name))
   })))
-  return entries.filter(filter).sort(entryCompare)
+  if(mapper) entries = await Promise.all(entries.map(entry => mapper(entry)))
+  if(filter) entries = entries.filter(filter)
+  return entries.sort(entryCompare)
 }
 
-async function observableList(dir, filter) {
+async function observableList(dir, filter, mapper) {
   const observable = new Dao.ObservableList()
   let watcher
   const oldDispose = observable.dispose
   const oldRespawn = observable.respawn
   const watch = async () => {
     if(watcher) watcher.close()
-    const list = await getList(dir, filter)
+    const list = await getList(dir, filter, mapper)
     observable.set(list)
     watcher = chokidar.watch(dir, { depth: 0, alwaysStat: true })
     watcher.on('add', async (name, stat) => {
       if(path.dirname(name) != dir) return
       name = path.relative(dir, name)
-      const entry = {
+      let entry = {
         name,
         isDirectory: false,
         stat
       }
-      if(filter(entry)) observable.putByField('name', name, entry)
+      if(mapper) entry = await mapper(entry)
+      if(filter && filter(entry)) observable.putByField('name', name, entry)
     })
     watcher.on('change', async (name, stat) => {
       if(path.dirname(name) != dir) return
@@ -121,7 +127,8 @@ async function observableList(dir, filter) {
         isDirectory: false,
         stat
       }
-      if(fitler(entry)) observable.putByField('name', name, entry)
+      if(mapper) entry = await mapper(entry)
+      if(filter && fitler(entry)) observable.putByField('name', name, entry)
     })
     watcher.on('unlink', async (name) => {
       if(path.dirname(name) != dir) return
@@ -131,12 +138,13 @@ async function observableList(dir, filter) {
     watcher.on('addDir', async (name, stat) => {
       if(path.dirname(name) != dir) return
       name = path.relative(dir, name)
-      const entry = {
+      let entry = {
         name,
         isDirectory: true,
         stat
       }
-      if(filter(entry)) observable.putByField('name', name, entry)
+      if(mapper) entry = await mapper(entry)
+      if(filter && filter(entry)) observable.putByField('name', name, entry)
     })
     watcher.on('unlinkDir', async (name, stat) => {
       if(path.dirname(name) != dir) return
@@ -157,7 +165,7 @@ async function observableList(dir, filter) {
   return observable
 }
 
-async function getTree(dir, prefix = '', filter) {
+async function getTree(dir, prefix = '', filter, mapper) {
   const list = await fs.promises.readdir(dir, { withFileTypes: true })
   const entriesLists = await Promise.all(list.map(async entry => {
     if(entry.isDirectory()) {
@@ -175,38 +183,43 @@ async function getTree(dir, prefix = '', filter) {
       }
     }
   }))
-  return entriesLists.flat().filter(filter).sort(entryCompare)
+  let entries = entriesLists.flat()
+  if(mapper) entries = await Promise.all(entries.map(entry => mapper(entry)))
+  if(filter) entries = entries.filter(filter)
+  return entries.sort(entryCompare)
 }
 
-async function observableTree(dir, filter) {
+async function observableTree(dir, filter, mapper) {
   const observable = new Dao.ObservableList()
   let watcher
   const oldDispose = observable.dispose
   const oldRespawn = observable.respawn
   const watch = async () => {
     if(watcher) watcher.close()
-    const list = await getTree(dir, filter)
+    const list = await getTree(dir, filter, mapper)
     observable.set(list)
     watcher = chokidar.watch(dir, { depth: 99, alwaysStat: true })
     watcher.on('add', async (name, stat) => {
       if(path.dirname(name) != dir) return
       name = path.relative(dir, name)
-      const entry = {
+      let entry = {
         name,
         isDirectory: false,
         stat
       }
-      if(filter(entry)) observable.putByField('name', name, entry)
+      if(mapper) entry = await mapper(entry)
+      if(filter && filter(entry)) observable.putByField('name', name, entry)
     })
     watcher.on('change', async (name, stat) => {
       if(path.dirname(name) != dir) return
       name = path.relative(dir, name)
-      const entry = {
+      let entry = {
         name,
         isDirectory: false,
         stat
       }
-      if(filter(entry)) observable.putByField('name', name, entry)
+      if(mapper) entry = await mapper(entry)
+      if(filter && filter(entry)) observable.putByField('name', name, entry)
     })
     watcher.on('unlink', async (name) => {
       if(path.dirname(name) != dir) return
@@ -216,12 +229,13 @@ async function observableTree(dir, filter) {
     watcher.on('addDir', async (name, stat) => {
       if(path.dirname(name) != dir) return
       name = path.relative(dir, name)
-      const entry = {
+      let entry = {
         name,
         isDir: true,
         stat
       }
-      if(filter(entry)) observable.putByField('name', name, entry)
+      if(mapper) entry = await mapper(entry)
+      if(filter && filter(entry)) observable.putByField('name', name, entry)
     })
     watcher.on('unlinkDir', async (name, stat) => {
       if(path.dirname(name) != dir) return
@@ -249,16 +263,16 @@ const filesystemDao = new Dao.SimpleDao({
       observable: (filename) => observableStat(filename)
     },
     content: {
-      get: (filename) => getContent(filename),
-      observable: (filename) => observableContent(filename)
+      get: (filename, decoder = x=>x ) => getContent(filename, decoder),
+      observable: (filename, decoder = x=>x ) => observableContent(filename, decoder)
     },
     list: {
-      get: (dir, filterSpec) => getList(dir, createFilter(filterSpec)),
-      observable: (dir, filterSpec) => observableList(dir, createFilter(filterSpec))
+      get: (dir, filterSpec, mapper) => getList(dir, createFilter(filterSpec), mapper),
+      observable: (dir, filterSpec, mapper) => observableList(dir, createFilter(filterSpec), mapper)
     },
     tree: {
-      get: (dir, filterSpec) => getTree(dir, '', createFilter(filterSpec)),
-      observable: (dir, filterSpec) => observableTree(dir, createFilter(filterSpec))
+      get: (dir, filterSpec, mapper) => getTree(dir, '', createFilter(filterSpec), mapper),
+      observable: (dir, filterSpec, mapper) => observableTree(dir, createFilter(filterSpec), mapper)
     }
   },
   methods: {}

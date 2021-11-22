@@ -122,7 +122,7 @@ async function observableList(dir, filter, mapper) {
     watcher.on('change', async (name, stat) => {
       if(path.dirname(name) != dir) return
       name = path.relative(dir, name)
-      const entry = {
+      let entry = {
         name,
         isDirectory: false,
         stat
